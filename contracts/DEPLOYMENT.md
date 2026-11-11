@@ -15,11 +15,11 @@ If a dedicated Foundry keystore is needed, create it in a local terminal. The pa
 
 ```sh
 mkdir -p "$HOME/.foundry/keystores"
-cast wallet new "$HOME/.foundry/keystores" neural-brake-testnet --password
+cast wallet new "$HOME/.foundry/keystores" neural-brake-testnet
 cast wallet address --account neural-brake-testnet
 ```
 
-Keep the account name/password local. The derived public address can be used for read-only balance checks and `NB_TESTNET_OWNER`; it is the only wallet detail that may be shared. Do not use a mainnet wallet.
+Foundry prompts for a hidden keystore password by default. Keep the account name/password local. The derived public address can be used for read-only balance checks and `NB_TESTNET_OWNER`; it is the only wallet detail that may be shared. Do not use a mainnet wallet.
 
 - Get Base Sepolia test ETH from a faucet linked by the [official Base faucet documentation](https://docs.base.org/base-chain/tools/network-faucets).
 - Reactive's [official Lasna faucet guide](https://dev.reactive.network/reactive-mainnet#get-testnet-react) describes converting Base Sepolia SepETH to lREACT, currently at `0x2afaFD298b23b62760711756088F75B7409f5967`, with a maximum of 5 SepETH per request. Use only the smallest supported test amount, and do not send anything until you explicitly approve that faucet transaction.
