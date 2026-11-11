@@ -12,7 +12,7 @@ from neural_brake import api
 from neural_brake.config import Settings
 from neural_brake.ingest import SWAP_TOPIC, RpcSource, SourceError, _ingest, decode_swap_log
 from neural_brake.storage import Store
-from neural_brake.verify_history import _pool_log
+from neural_brake.verify_history import _get_page, _pool_log, _post
 
 CHAIN_ID = 84532
 POOL = "0x46880b404CD35c165EDdefF7421019F8dD25F4Ad"
@@ -65,6 +65,54 @@ def test_blockscout_null_topic_slot_is_normalized_for_receipt_verification():
     item["topics"] = raw["topics"] + ["0x" + "00" * 32]
     with pytest.raises(SourceError, match="topic list"):
         _pool_log(item, POOL)
+
+
+def test_history_page_retries_transient_transport_error(monkeypatch):
+    class FlakyClient:
+        calls = 0
+
+        async def get(self, url, params=None):
+            self.calls += 1
+            if self.calls == 1:
+                raise httpx.ReadError("temporary disconnect")
+            request = httpx.Request("GET", url)
+            return httpx.Response(200, json={"items": []}, request=request)
+
+    sleeps = []
+
+    async def record_sleep(delay):
+        sleeps.append(delay)
+
+    monkeypatch.setattr("neural_brake.verify_history.asyncio.sleep", record_sleep)
+    client = FlakyClient()
+    result = asyncio.run(_get_page(client, "https://explorer.test/logs", None))
+    assert result == {"items": []}
+    assert client.calls == 2
+    assert sleeps == [1.0]
+
+
+def test_rpc_post_retries_transient_transport_error(monkeypatch):
+    class FlakyClient:
+        calls = 0
+
+        async def post(self, url, json):
+            self.calls += 1
+            if self.calls == 1:
+                raise httpx.ReadError("temporary disconnect")
+            request = httpx.Request("POST", url)
+            return httpx.Response(200, json={"result": "0x1"}, request=request)
+
+    sleeps = []
+
+    async def record_sleep(delay):
+        sleeps.append(delay)
+
+    monkeypatch.setattr("neural_brake.verify_history.asyncio.sleep", record_sleep)
+    client = FlakyClient()
+    result = asyncio.run(_post(client, "https://rpc.test", {"method": "eth_chainId"}))
+    assert result == {"result": "0x1"}
+    assert client.calls == 2
+    assert sleeps == [1.0]
 
 
 @pytest.mark.parametrize("mutation", [

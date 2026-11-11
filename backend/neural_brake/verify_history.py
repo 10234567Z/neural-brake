@@ -23,7 +23,13 @@ BATCH_SIZE = 50
 
 async def _post(client: httpx.AsyncClient, url: str, payload: Any) -> Any:
     for attempt in range(8):
-        response = await client.post(url, json=payload)
+        try:
+            response = await client.post(url, json=payload)
+        except httpx.TransportError:
+            if attempt == 7:
+                raise SourceError("RPC transport failure persisted after bounded retries") from None
+            await asyncio.sleep(min(1.0 + attempt, 8.0))
+            continue
         if response.status_code == 429:
             retry_after = response.headers.get("retry-after")
             delay = float(retry_after) if retry_after and retry_after.isdigit() else min(1.0 + attempt, 8.0)
@@ -74,7 +80,13 @@ async def _rpc_batch(client: httpx.AsyncClient, url: str, calls: list[tuple[str,
 
 async def _get_page(client: httpx.AsyncClient, url: str, params: dict[str, int] | None) -> Any:
     for attempt in range(8):
-        response = await client.get(url, params=params)
+        try:
+            response = await client.get(url, params=params)
+        except httpx.TransportError:
+            if attempt == 7:
+                raise SourceError("history service transport failure persisted after bounded retries") from None
+            await asyncio.sleep(min(1.0 + attempt, 8.0))
+            continue
         if response.status_code == 429:
             retry_after = response.headers.get("retry-after")
             delay = float(retry_after) if retry_after and retry_after.isdigit() else min(1.0 + attempt, 8.0)
