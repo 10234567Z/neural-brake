@@ -10,7 +10,7 @@ import asyncio
 from datetime import datetime, timezone
 import json
 import os
-from typing import Any
+from typing import Any, AsyncIterator
 
 import httpx
 
@@ -21,7 +21,8 @@ from .storage import Store
 BLOCKSCOUT_EXPLORER = "https://base-sepolia.blockscout.com/api/v2/addresses"
 BLOCKSCOUT_API = "https://api.blockscout.com"
 PAGE_SIZE = 100
-BATCH_SIZE = 50
+BATCH_SIZE = 20
+RPC_BATCH_DELAY = 0.9
 
 
 def _history_endpoint(chain_id: int, pool: str, api_key: str | None) -> tuple[str, dict[str, str]]:
@@ -92,6 +93,19 @@ async def _rpc_batch(client: httpx.AsyncClient, url: str, calls: list[tuple[str,
             continue
         values.append(item["result"])
     return values
+
+
+async def _rpc_batches(
+    client: httpx.AsyncClient,
+    url: str,
+    calls: list[tuple[str, list[Any]]],
+) -> AsyncIterator[tuple[int, list[tuple[str, list[Any]]], list[Any]]]:
+    for offset in range(0, len(calls), BATCH_SIZE):
+        batch = calls[offset:offset + BATCH_SIZE]
+        results = await _rpc_batch(client, url, batch)
+        yield offset, batch, results
+        if offset + len(batch) < len(calls):
+            await asyncio.sleep(RPC_BATCH_DELAY)
 
 
 async def _get_page(client: httpx.AsyncClient, url: str, params: dict[str, int] | None) -> Any:
@@ -280,31 +294,29 @@ async def verify_history(since: datetime, max_pages: int = 1000, page_delay: flo
             logs_by_tx.setdefault(log["transaction_hash"], []).append((key, log))
         transactions = sorted(logs_by_tx)
         receipts: dict[str, dict[str, Any]] = {}
-        for offset in range(0, len(transactions), BATCH_SIZE):
-            batch = transactions[offset:offset + BATCH_SIZE]
-            results = await _rpc_batch(client, settings.rpc_url, [
-                ("eth_getTransactionReceipt", [tx_hash]) for tx_hash in batch
-            ])
-            for tx_hash, receipt in zip(batch, results, strict=True):
+        receipt_calls = [("eth_getTransactionReceipt", [tx_hash]) for tx_hash in transactions]
+        async for _, batch, results in _rpc_batches(client, settings.rpc_url, receipt_calls):
+            for (_, params), receipt in zip(batch, results, strict=True):
+                tx_hash = params[0]
                 if not isinstance(receipt, dict) or receipt.get("transactionHash", "").lower() != tx_hash:
                     raise SourceError("RPC transaction receipt missing or mismatched")
                 if receipt.get("status") != "0x1":
                     raise SourceError("Swap transaction receipt did not succeed")
                 receipts[tx_hash] = receipt
-            print(f"Verified receipts: {len(receipts)}/{len(transactions)}", flush=True)
+            if len(receipts) % 1000 == 0 or len(receipts) == len(transactions):
+                print(f"Verified receipts: {len(receipts)}/{len(transactions)}", flush=True)
 
         block_numbers = sorted({key[0] for key in swaps})
         headers: dict[int, dict[str, Any]] = {}
-        for offset in range(0, len(block_numbers), BATCH_SIZE):
-            batch = block_numbers[offset:offset + BATCH_SIZE]
-            results = await _rpc_batch(client, settings.rpc_url, [
-                ("eth_getBlockByNumber", [hex(block_number), False]) for block_number in batch
-            ])
-            for block_number, header in zip(batch, results, strict=True):
+        header_calls = [("eth_getBlockByNumber", [hex(block_number), False]) for block_number in block_numbers]
+        async for _, batch, results in _rpc_batches(client, settings.rpc_url, header_calls):
+            for (_, params), header in zip(batch, results, strict=True):
+                block_number = int(params[0], 16)
                 if not isinstance(header, dict) or int(header.get("number", "0x-1"), 16) != block_number:
                     raise SourceError("RPC block header missing or mismatched")
                 headers[block_number] = header
-            print(f"Verified block headers: {len(headers)}/{len(block_numbers)}", flush=True)
+            if len(headers) % 1000 == 0 or len(headers) == len(block_numbers):
+                print(f"Verified block headers: {len(headers)}/{len(block_numbers)}", flush=True)
 
         verified = []
         for key, expected in swaps.items():

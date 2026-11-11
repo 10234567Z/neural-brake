@@ -13,7 +13,8 @@ from neural_brake.config import Settings
 from neural_brake.ingest import SWAP_TOPIC, RpcSource, SourceError, _ingest, decode_swap_log
 from neural_brake.storage import Store
 from neural_brake.verify_history import (
-    _get_page, _history_endpoint, _page_params, _pool_log, _post, _recover_transaction_hash,
+    _get_page, _history_endpoint, _page_params, _pool_log, _post, _recover_transaction_hash, _rpc_batches,
+    RPC_BATCH_DELAY,
 )
 
 CHAIN_ID = 84532
@@ -104,6 +105,29 @@ def test_recovers_missing_explorer_transaction_hash_from_matching_rpc_log():
 
     result = asyncio.run(_recover_transaction_hash(MockClient(), "https://rpc.test", CHAIN_ID, POOL, expected))
     assert result == TX_HASH.lower()
+
+
+def test_rpc_batches_are_throttled_between_provider_sized_batches(monkeypatch):
+    batch_sizes = []
+    sleeps = []
+
+    async def fake_rpc_batch(client, url, calls):
+        batch_sizes.append(len(calls))
+        return list(range(len(calls)))
+
+    async def record_sleep(delay):
+        sleeps.append(delay)
+
+    monkeypatch.setattr("neural_brake.verify_history._rpc_batch", fake_rpc_batch)
+    monkeypatch.setattr("neural_brake.verify_history.asyncio.sleep", record_sleep)
+
+    async def collect():
+        return [batch async for batch in _rpc_batches(None, "https://rpc.test", [("eth_chainId", [])] * 41)]
+
+    batches = asyncio.run(collect())
+    assert batch_sizes == [20, 20, 1]
+    assert len(batches) == 3
+    assert sleeps == [RPC_BATCH_DELAY, RPC_BATCH_DELAY]
 
 
 def test_history_endpoint_uses_authenticated_multichain_api_without_key_in_url():
