@@ -12,10 +12,18 @@ export type Swap = {
   liquidity: string; tick: number
 }
 export type CandidateFeed = { items: unknown[]; available: boolean; reason?: string }
+export type ResearchScore = {
+  status: 'research_only'; automatic_action_enabled: false; candidate_id: string; model_version: string
+  training_dataset_sha256: string; chain_id: number; pool_address: string; as_of: string
+  input_age_seconds: number; snapshot_observation_count: number; block_number: number
+  transaction_hash: string; log_index: number; risk_score: number; score_scale: 10000
+  threshold: number; high_volatility_candidate: boolean; warning: string
+}
 export type Resource<T> = { value: T | null; error: string | null; stale?: boolean }
 export type DashboardData = {
   live: Resource<{ status: string }>; readiness: Resource<Readiness>; config: Resource<RuntimeConfig>
-  swaps: Resource<{ items: Swap[]; next_cursor: string | null }>; candidates: Resource<CandidateFeed>; checkedAt: Date
+  swaps: Resource<{ items: Swap[]; next_cursor: string | null }>; candidates: Resource<CandidateFeed>
+  researchScore: Resource<ResearchScore>; checkedAt: Date
 }
 const obj = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v)
 const string = (v: unknown): v is string => typeof v === 'string'
@@ -49,6 +57,17 @@ function isSwapPage(v: unknown): v is { items: Swap[]; next_cursor: string | nul
 function isCandidateFeed(v: unknown): v is CandidateFeed {
   return obj(v) && Array.isArray(v.items) && bool(v.available) && (v.reason === undefined || string(v.reason)) && Object.keys(v).every(k => ['items','available','reason'].includes(k))
 }
+function isResearchScore(v: unknown): v is ResearchScore {
+  return obj(v) && v.status === 'research_only' && v.automatic_action_enabled === false &&
+    string(v.candidate_id) && string(v.model_version) && string(v.training_dataset_sha256) &&
+    integer(v.chain_id) && address(v.pool_address) && string(v.as_of) && Number.isFinite(Date.parse(v.as_of)) &&
+    integer(v.input_age_seconds) && v.input_age_seconds >= 0 && integer(v.snapshot_observation_count) &&
+    integer(v.block_number) && string(v.transaction_hash) && /^0x[0-9a-fA-F]{64}$/.test(v.transaction_hash) &&
+    integer(v.log_index) && integer(v.risk_score) && v.risk_score >= 0 && v.risk_score <= 10000 &&
+    v.score_scale === 10000 && integer(v.threshold) && v.threshold >= 0 && v.threshold <= 10000 &&
+    bool(v.high_volatility_candidate) && string(v.warning) &&
+    Object.keys(v).every(k => ['status','automatic_action_enabled','candidate_id','model_version','training_dataset_sha256','chain_id','pool_address','as_of','input_age_seconds','snapshot_observation_count','block_number','transaction_hash','log_index','risk_score','score_scale','threshold','high_volatility_candidate','warning'].includes(k))
+}
 async function readJson(path: string): Promise<{ status: number; body: unknown }> {
   const response = await fetch(path, { headers: { Accept: 'application/json' } })
   let body: unknown
@@ -72,12 +91,13 @@ async function readReadiness(): Promise<Resource<Readiness>> {
   } catch (error) { return { value: null, error: error instanceof Error ? error.message : 'Readiness unavailable' } }
 }
 export async function loadDashboard(): Promise<DashboardData> {
-  const [live, readiness, config, swaps, candidates] = await Promise.all([
+  const [live, readiness, config, swaps, candidates, researchScore] = await Promise.all([
     resource('/api/v1/health/live', (v): v is { status: string } => obj(v) && string(v.status)),
     readReadiness(),
     resource('/api/v1/config', isConfig),
     resource('/api/v1/swaps?limit=20', isSwapPage),
     resource('/api/v1/candidates/latest', isCandidateFeed),
+    resource('/api/v1/research/latest-score', isResearchScore),
   ])
-  return { live, readiness, config, swaps, candidates, checkedAt: new Date() }
+  return { live, readiness, config, swaps, candidates, researchScore, checkedAt: new Date() }
 }
