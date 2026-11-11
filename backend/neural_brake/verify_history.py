@@ -20,6 +20,7 @@ from .storage import Store
 
 BLOCKSCOUT_EXPLORER = "https://base-sepolia.blockscout.com/api/v2/addresses"
 BLOCKSCOUT_API = "https://api.blockscout.com"
+PAGE_SIZE = 100
 BATCH_SIZE = 50
 
 
@@ -28,6 +29,12 @@ def _history_endpoint(chain_id: int, pool: str, api_key: str | None) -> tuple[st
         url = f"{BLOCKSCOUT_API}/{chain_id}/api/v2/addresses/{pool}/logs"
         return url, {"Authorization": f"Bearer {api_key}"}
     return f"{BLOCKSCOUT_EXPLORER}/{pool}/logs", {}
+
+
+def _page_params(cursor: dict[str, int] | None) -> dict[str, int]:
+    params = dict(cursor or {})
+    params["items_count"] = PAGE_SIZE
+    return params
 
 
 async def _post(client: httpx.AsyncClient, url: str, payload: Any) -> Any:
@@ -169,7 +176,7 @@ async def verify_history(since: datetime, max_pages: int = 1000, page_delay: flo
         previous_oldest_block: int | None = None
         reached_boundary = False
         while pages < max_pages:
-            payload = await _get_page(client, endpoint, cursor)
+            payload = await _get_page(client, endpoint, _page_params(cursor))
             items = payload.get("items")
             if not isinstance(items, list):
                 raise SourceError("Blockscout returned a malformed history page")

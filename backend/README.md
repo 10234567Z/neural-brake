@@ -11,7 +11,7 @@ Configure using these application environment names (secrets are not stored in t
 | Variable | Required/use | Default |
 |---|---|---|
 | `NB_RPC_URL` | Optional for serving; required to enable the explicit read-only source adapter. Use an operator-controlled Base Sepolia JSON-RPC URL. | unset |
-| `NB_BLOCKSCOUT_API_KEY` | Optional for historical import. Uses Blockscout's authenticated multichain API instead of the public explorer endpoint. Store only in the runtime environment/ignored local `.env`. | unset |
+| `NB_BLOCKSCOUT_API_KEY` | Optional for historical import when the key's plan supports Base Sepolia. Uses Blockscout's authenticated multichain API instead of the public explorer endpoint. Store only in the runtime environment/ignored local `.env`. | unset |
 | `NB_DATABASE_PATH` | Local SQLite file path. | `./neural_brake.sqlite3` |
 | `NB_CHAIN_ID` | Expected RPC chain identity. | `84532` |
 | `NB_POOL_ADDRESS` | Pool queried by the source adapter. | provisional `0x46880b404CD35c165EDdefF7421019F8dD25F4Ad` |
@@ -21,7 +21,7 @@ Configure using these application environment names (secrets are not stored in t
 | `NB_MODEL_ARTIFACT` | Future model artifact location; configuring a path does not load or validate a model. | unset |
 | `NB_SCORE_REGISTRY_ADDRESS`, `NB_REACTIVE_ADDRESS`, `NB_VAULT_ADDRESS` | Future deployment references; configured references are not verified deployments. | unset |
 
-RPC URL and Blockscout API key values may contain credentials and must be provided through the runtime environment/secret manager, never committed. No signer/private-key environment variable is defined because publishing is disabled. A free Blockscout API key is available at [dev.blockscout.com](https://dev.blockscout.com); see [official API authorization and route docs](https://docs.blockscout.com/devs/blockscout-api-responses-and-routes).
+RPC URL and Blockscout API key values may contain credentials and must be provided through the runtime environment/secret manager, never committed. No signer/private-key environment variable is defined because publishing is disabled. See [official API authorization and route docs](https://docs.blockscout.com/devs/blockscout-api-responses-and-routes). The free Blockscout API key returned HTTP 402 for Base Sepolia in this environment; the authenticated multichain endpoint requires a Builder, Business, or Pro plan for this chain. Do not upgrade without explicit budget approval. Without a supported key, unset `NB_BLOCKSCOUT_API_KEY` and use the public Base Sepolia explorer endpoint.
 
 ## API and data
 
