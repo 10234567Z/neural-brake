@@ -351,8 +351,7 @@ async def verify_history(since: datetime, max_pages: int = 1000, page_delay: flo
 
     # Store only after the entire paginated dataset has been receipt/block verified.
     store = Store(settings.database_path)
-    for observation in verified:
-        store.add_swap(observation)
+    store.add_swaps(verified)
     timestamps = sorted(item.timestamp for item in verified if item.timestamp)
     return {
         "pool_address": settings.pool_address,

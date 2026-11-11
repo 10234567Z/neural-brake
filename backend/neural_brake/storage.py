@@ -2,6 +2,7 @@
 
 import json
 import sqlite3
+from collections.abc import Iterable
 from pathlib import Path
 
 from .schemas import SwapObservation
@@ -27,13 +28,21 @@ class Store:
         return db
 
     def add_swap(self, observation: SwapObservation) -> None:
-        payload = observation.model_dump_json()
+        self.add_swaps([observation])
+
+    def add_swaps(self, observations: Iterable[SwapObservation]) -> None:
+        rows = [(
+            observation.chain_id,
+            observation.pool_address.lower(),
+            observation.block_number,
+            observation.block_hash,
+            observation.transaction_hash,
+            observation.log_index,
+            observation.timestamp.isoformat() if observation.timestamp else None,
+            observation.model_dump_json(),
+        ) for observation in observations]
         with self.connect() as db:
-            db.execute("INSERT OR IGNORE INTO swaps VALUES (?, ?, ?, ?, ?, ?, ?, ?)", (
-                observation.chain_id, observation.pool_address.lower(), observation.block_number,
-                observation.block_hash, observation.transaction_hash, observation.log_index,
-                observation.timestamp.isoformat() if observation.timestamp else None, payload,
-            ))
+            db.executemany("INSERT OR IGNORE INTO swaps VALUES (?, ?, ?, ?, ?, ?, ?, ?)", rows)
 
     def list_swaps(self, offset: int, limit: int) -> tuple[list[SwapObservation], int]:
         with self.connect() as db:

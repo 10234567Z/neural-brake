@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import sqlite3
 from datetime import datetime, timezone
 
 import httpx
@@ -253,6 +254,28 @@ def test_ingest_persists_rpc_timestamp_and_is_idempotent(monkeypatch, tmp_path):
     count, first, last = Store(path).audit()
     assert count == 1
     assert first == last == datetime.fromtimestamp(1791234567, timezone.utc).isoformat()
+
+
+def test_bulk_store_rolls_back_entire_batch_on_insert_failure(tmp_path):
+    path = str(tmp_path / "atomic.sqlite3")
+    store = Store(path)
+    first_log = _fixture_swap_log()
+    second_log = _fixture_swap_log()
+    second_log["transactionHash"] = "0x" + "ef" * 32
+    timestamp = datetime(2026, 11, 9, 14, 52, 39, tzinfo=timezone.utc)
+    first = decode_swap_log(first_log, CHAIN_ID, POOL, timestamp)
+    second = decode_swap_log(second_log, CHAIN_ID, POOL, timestamp)
+
+    with store.connect() as db:
+        db.execute(
+            f"CREATE TRIGGER reject_second BEFORE INSERT ON swaps "
+            f"WHEN NEW.transaction_hash = '{second.transaction_hash}' "
+            "BEGIN SELECT RAISE(ABORT, 'intentional test failure'); END"
+        )
+
+    with pytest.raises(sqlite3.IntegrityError, match="intentional test failure"):
+        store.add_swaps([first, second])
+    assert store.audit()[0] == 0
 
 
 def test_ingest_rejects_chain_mismatch_without_persisting(monkeypatch, tmp_path):
