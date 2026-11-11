@@ -363,6 +363,8 @@ def _mock_rpc(monkeypatch, chain_id: int, block_hash: str, receipt_status: str =
         method = body["method"]
         if method == "eth_chainId":
             result = hex(chain_id)
+        elif method == "eth_blockNumber":
+            result = hex(56570553)
         elif method == "eth_getLogs":
             result = [log]
         elif method == "eth_getBlockByNumber":
@@ -391,6 +393,12 @@ def test_ingest_persists_rpc_timestamp_and_is_idempotent(monkeypatch, tmp_path):
     count, first, last = Store(path).audit()
     assert count == 1
     assert first == last == datetime.fromtimestamp(1791234567, timezone.utc).isoformat()
+
+
+def test_rpc_source_reads_head_on_verified_chain(monkeypatch, tmp_path):
+    settings = _settings(str(tmp_path / "head.sqlite3"))
+    _mock_rpc(monkeypatch, CHAIN_ID, BLOCK_HASH)
+    assert asyncio.run(RpcSource(settings).get_head()) == 56570553
 
 
 def test_bulk_store_rolls_back_entire_batch_on_insert_failure(tmp_path):

@@ -91,6 +91,18 @@ class RpcSource:
         except (httpx.HTTPError, ValueError, KeyError, TypeError) as exc:
             raise SourceError("RPC chain identity check failed") from exc
 
+    async def get_head(self) -> int:
+        await self.verify_chain()
+        async with httpx.AsyncClient(timeout=10) as client:
+            response = await client.post(self.settings.rpc_url, json={"jsonrpc": "2.0", "id": 5,
+                "method": "eth_blockNumber", "params": []})
+            response.raise_for_status()
+            payload = response.json()
+        raw = payload.get("result") if isinstance(payload, dict) and not payload.get("error") else None
+        if not isinstance(raw, str) or not QUANTITY.fullmatch(raw):
+            raise SourceError("RPC returned an invalid head block")
+        return int(raw, 16)
+
     async def get_logs(self, from_block: int, to_block: int) -> list[dict]:
         if from_block < 0 or to_block < from_block or to_block - from_block > 2000:
             raise ValueError("block range must be ordered and at most 2001 blocks")
@@ -146,8 +158,8 @@ class RpcSource:
         return receipt
 
 
-async def _ingest(from_block: int, to_block: int) -> int:
-    settings = Settings.from_env()
+async def _ingest(from_block: int, to_block: int, settings: Settings | None = None) -> int:
+    settings = settings or Settings.from_env()
     source = RpcSource(settings)
     logs = await source.get_logs(from_block, to_block)
     verified = []

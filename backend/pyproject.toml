@@ -20,6 +20,7 @@ neural-brake-verify-history = "neural_brake.verify_history:main"
 neural-brake-train = "neural_brake.model:main"
 neural-brake-score = "neural_brake.scoring:main"
 neural-brake-preflight = "neural_brake.preflight:main"
+neural-brake-watch = "neural_brake.watch:main"
 neural-brake-export-swaps = "neural_brake.export_dataset:main"
 
 [tool.setuptools.packages.find]
