@@ -21,8 +21,8 @@ from .storage import Store
 BLOCKSCOUT_EXPLORER = "https://base-sepolia.blockscout.com/api/v2/addresses"
 BLOCKSCOUT_API = "https://api.blockscout.com"
 PAGE_SIZE = 100
-BATCH_SIZE = 20
-RPC_BATCH_DELAY = 0.9
+BATCH_SIZE = 25
+RPC_BATCH_DELAY = 1.0
 
 
 def _history_endpoint(chain_id: int, pool: str, api_key: str | None) -> tuple[str, dict[str, str]]:

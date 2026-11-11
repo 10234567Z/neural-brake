@@ -126,9 +126,9 @@ def test_rpc_batches_are_throttled_between_provider_sized_batches(monkeypatch):
         return [batch async for batch in _rpc_batches(None, "https://rpc.test", [("eth_chainId", [])] * 41)]
 
     batches = asyncio.run(collect())
-    assert batch_sizes == [20, 20, 1]
-    assert len(batches) == 3
-    assert sleeps == [RPC_BATCH_DELAY, RPC_BATCH_DELAY]
+    assert batch_sizes == [25, 16]
+    assert len(batches) == 2
+    assert sleeps == [RPC_BATCH_DELAY]
 
 
 def test_history_endpoint_uses_authenticated_multichain_api_without_key_in_url():
