@@ -18,7 +18,8 @@ Configure using these application environment names (secrets are not stored in t
 | `NB_TOKEN0_ADDRESS`, `NB_TOKEN1_ADDRESS` | Provisional pool token references for configuration display. | USDC `0x036CbD53842c5426634e7929541eC2318f3dCF7e`, WETH `0x4200000000000000000000000000000000000006` |
 | `NB_TOKEN0_DECIMALS`, `NB_TOKEN1_DECIMALS` | Provisional verified token decimals used by the offline price feature calculation. | USDC `6`, WETH `18` |
 | `NB_POOL_FEE` | Pool fee tier. | `3000` |
-| `NB_MODEL_ARTIFACT` | Future model artifact location; configuring a path does not load or validate a model. | unset |
+| `NB_MODEL_ARTIFACT` | Optional research model artifact. It is loaded only when `NB_RESEARCH_DATASET` is also set and hashes/source metadata validate. This does not make readiness pass or enable publication. | unset |
+| `NB_RESEARCH_DATASET` | Optional receipt-verified JSONL snapshot matching the artifact's training dataset hash. Enables `GET /api/v1/research/latest-score`; scoring remains research-only. | unset |
 | `NB_SCORE_REGISTRY_ADDRESS`, `NB_REACTIVE_ADDRESS`, `NB_VAULT_ADDRESS` | Future deployment references; configured references are not verified deployments. | unset |
 
 RPC URL and Blockscout API key values may contain credentials and must be provided through the runtime environment/secret manager, never committed. No signer/private-key environment variable is defined because publishing is disabled. See [official API authorization and route docs](https://docs.blockscout.com/devs/blockscout-api-responses-and-routes). The free Blockscout API key returned HTTP 402 for Base Sepolia in this environment; the authenticated multichain endpoint requires a Builder, Business, or Pro plan for this chain. Do not upgrade without explicit budget approval. Without a supported key, unset `NB_BLOCKSCOUT_API_KEY` and use the public Base Sepolia explorer endpoint.
@@ -26,6 +27,19 @@ RPC URL and Blockscout API key values may contain credentials and must be provid
 ## API and data
 
 Implements the proposed `GET /api/v1/health/live`, `/health/ready`, `/config`, `/swaps`, `/candidates/latest`, and `/candidates/{candidateId}` routes, plus a fail-closed `POST /candidates/{candidateId}/publish` and `/audit`. Readiness currently returns 503 because source/model/deployments are not validated and there is no loaded model. Empty candidates mean unavailable—not zero risk or a computed score. Swap pagination is capped at 100; cursors are bounded opaque offsets. `/audit` reports only what is actually present in the local cache, without a go/no-go threshold.
+
+When a validated artifact and its exact verified training snapshot are configured, `GET /api/v1/research/latest-score` returns one explicitly `research_only` score for the latest snapshot observations. This endpoint is read-only: `/health/ready` remains 503, `/candidates/latest` remains unavailable for operational use, and publication still returns 503. The latest score is based on the supplied static snapshot, not a live feed.
+
+To try that local-only research endpoint, set all three paths before starting the API:
+
+```sh
+export NB_DATABASE_PATH=/path/to/receipt-verified-history.sqlite3
+export NB_MODEL_ARTIFACT=/path/to/neural-brake.pt
+export NB_RESEARCH_DATASET=/path/to/the-exact-training-snapshot.jsonl
+uvicorn neural_brake.api:app
+```
+
+The dataset hash must match the model manifest. The score remains research-only; no ingestion worker, transaction signing, publication, or pause is enabled.
 
 `neural_brake.ingest.RpcSource` provides a bounded (`<= 2001` blocks), read-only JSON-RPC log query and strict Uniswap v3 Swap event decoder. It verifies RPC chain ID, pool address, event signature, and the two canonical indexed address topics; rejects removed logs and malformed/noncanonical ABI fields. Ingestion fetches each distinct referenced block, requires the returned block number/hash to match the log, and stores that block's actual UTC timestamp. The bounded range is validated before any returned records are persisted. Run `neural-brake-ingest --from-block N --to-block M` to explicitly query and cache a bounded range; it does not run as a worker and does not assert finality, completeness, or current live activity. The stored observations are a cache, not chain authority.
 
@@ -43,6 +57,6 @@ neural-brake-train --dataset /path/to/rpc-verified-swaps.jsonl --output /path/to
 neural-brake-score --dataset /path/to/rpc-verified-swaps.jsonl --artifact /path/to/neural-brake.pt
 ```
 
-The trainer validates chain, pool, token pair, timestamps and unique log identities; builds log-price returns from Uniswap `sqrtPriceX96` with the verified USDC/WETH decimals; uses a chronological 70/15/15 split, a future realized-volatility label cutoff derived only from training data, and a score threshold selected on validation. The full-history run produced 20,088 train, 4,299 validation and 4,300 test samples. Test results: F1 `0.0909`, precision `0.0503`, balanced accuracy `0.5618`, with 77 true positives and 1,455 false positives. This passes the trainer's minimum gate but is weak and not suitable for automated pausing; the test partition has been observed and must not be tuned against. `neural-brake-score` produces an explicitly `research_only` score from a verified snapshot; it does not publish or pause. No trained artifact is loaded by the API. See `docs/source-audit.md` for provenance and limits.
+The trainer validates chain, pool, token pair, timestamps and unique log identities; builds log-price returns from Uniswap `sqrtPriceX96` with the verified USDC/WETH decimals; uses a chronological 70/15/15 split, a future realized-volatility label cutoff derived only from training data, and a score threshold selected on validation. The full-history run produced 20,088 train, 4,299 validation and 4,300 test samples. Test results: F1 `0.0909`, precision `0.0503`, balanced accuracy `0.5618`, with 77 true positives and 1,455 false positives. This passes the trainer's minimum gate but is weak and not suitable for automated pausing; the test partition has been observed and must not be tuned against. `neural-brake-score` and `/api/v1/research/latest-score` produce explicitly `research_only` scores from a verified snapshot; neither publishes nor pauses. No trained artifact is loaded by default. See `docs/source-audit.md` for provenance and limits.
 
 Audit the current cache with `neural-brake-audit`; it reports actual count and timestamp span and configuration presence only. There are no product seed rows, mock data, training fixtures, scores, or synthetic events.

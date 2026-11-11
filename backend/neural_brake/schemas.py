@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 
@@ -63,6 +64,27 @@ class CandidateUnavailable(BaseModel):
     items: list[dict] = Field(default_factory=list)
     available: bool = False
     reason: str
+
+
+class ResearchScore(BaseModel):
+    status: Literal["research_only"]
+    automatic_action_enabled: Literal[False]
+    candidate_id: str
+    model_version: str
+    training_dataset_sha256: str
+    chain_id: int = Field(ge=1)
+    pool_address: str
+    as_of: datetime
+    input_age_seconds: int = Field(ge=0)
+    snapshot_observation_count: int = Field(ge=0)
+    block_number: int = Field(ge=0)
+    transaction_hash: str
+    log_index: int = Field(ge=0)
+    risk_score: int = Field(ge=0)
+    score_scale: int = Field(gt=0)
+    threshold: int = Field(ge=0)
+    high_volatility_candidate: bool
+    warning: str
 
 
 class PublicationDisabled(BaseModel):

@@ -10,7 +10,7 @@ This workspace contains a local read-only API, a responsive dashboard, Solidity 
 
 - The selected source is the Base Sepolia Uniswap v3 USDC/WETH 0.3% pool, `0x46880b404CD35c165EDdefF7421019F8dD25F4Ad`.
 - A full Blockscout history pagination run returned 28,727 Swap logs from 2024-02-14 through 2026-11-11. Every returned log was matched to a successful RPC receipt and block header; independent proof that the explorer omitted no logs is still outstanding.
-- The offline neural model passed only the trainer's minimum holdout gate on that snapshot. Test precision was 5.0% (77 true positives, 1,455 false positives); that is weak evidence, not a model suitable for automated pausing. The artifact is not loaded; the API reports no candidates.
+- The offline neural model passed only the trainer's minimum holdout gate on that snapshot. Test precision was 5.0% (77 true positives, 1,455 false positives); that is weak evidence, not a model suitable for automated pausing. A local opt-in research endpoint can show a score from the exact snapshot; no operational candidate is approved.
 - The API's publication route returns `503`. No signer, operator approval flow, deployed registry/Reactive/vault contracts, callback transaction, or paused vault exists.
 - Contracts and local tests do not demonstrate a live cross-chain integration. The vault accepts no assets and must never be used to protect funds.
 
@@ -72,4 +72,4 @@ The trainer uses chronological train/validation/test partitions, derives the vol
 4. Implement operator authentication, approved signer custody, idempotent publication and safe reconciliation before enabling writes. Never place keys in the browser, repository, logs or chat.
 5. Independently reconcile the source event, score publication receipt, Reactive callback transaction and authoritative vault state. A dashboard status or local test is not proof of the full loop.
 
-The repository is public, but no production safety, useful model effectiveness, deployment, or completed cross-chain loop is claimed here.
+The repository is public, but no production safety, useful model effectiveness, deployment, or completed cross-chain loop is claimed here. The opt-in research score is not a live feed or an instruction to pause deposits.

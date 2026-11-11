@@ -4,6 +4,7 @@ import asyncio
 import hashlib
 import json
 import sqlite3
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 
 import httpx
@@ -223,6 +224,42 @@ def test_research_model_rejects_tampered_artifact(tmp_path):
 
     with pytest.raises(SourceError, match="artifact checksum"):
         load_research_model(artifact, settings)
+
+
+def test_research_score_api_is_read_only_and_does_not_change_readiness(monkeypatch, tmp_path):
+    settings = _research_settings(str(tmp_path / "research.sqlite3"))
+    artifact = _test_research_artifact(tmp_path, settings)
+    settings = replace(settings, model_artifact=artifact)
+    model = load_research_model(artifact, settings)
+    records = _timestamped_observations(11)
+    store = Store(settings.database_path)
+    store.add_swaps(records)
+    monkeypatch.setattr(api, "settings", settings)
+    monkeypatch.setattr(api, "store", store)
+    monkeypatch.setattr(api, "research_model", model)
+    monkeypatch.setattr(api, "research_records", records)
+    monkeypatch.setattr(api, "research_model_error", None)
+    client = TestClient(api.app)
+
+    response = client.get("/api/v1/research/latest-score")
+    assert response.status_code == 200
+    assert response.json()["status"] == "research_only"
+    assert response.json()["automatic_action_enabled"] is False
+    assert response.json()["snapshot_observation_count"] == len(records)
+
+    ready = client.get("/api/v1/health/ready")
+    assert ready.status_code == 503
+    assert ready.json()["detail"]["components"]["model"]["available"] is False
+    assert client.get("/api/v1/candidates/latest").json()["available"] is False
+    assert client.post("/api/v1/candidates/research/publish").status_code == 503
+
+
+def test_research_score_endpoint_is_blocked_without_explicit_configuration(monkeypatch):
+    monkeypatch.setattr(api, "research_model", None)
+    monkeypatch.setattr(api, "research_records", None)
+    monkeypatch.setattr(api, "research_model_error", None)
+    response = TestClient(api.app).get("/api/v1/research/latest-score")
+    assert response.status_code == 503
 
 
 def test_history_endpoint_uses_authenticated_multichain_api_without_key_in_url():

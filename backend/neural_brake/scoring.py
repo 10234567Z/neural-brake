@@ -30,6 +30,7 @@ class LoadedResearchModel:
     window: int
     threshold: int
     model_version: str
+    training_dataset_sha256: str
     test_precision: float | None
 
 
@@ -137,6 +138,7 @@ def load_research_model(artifact_path: str, settings: Settings) -> LoadedResearc
         window=window,
         threshold=threshold,
         model_version=manifest["model_version"],
+        training_dataset_sha256=manifest["dataset_sha256"],
         test_precision=test_precision,
     )
 
@@ -170,12 +172,11 @@ def latest_features(records: list[SwapObservation], settings: Settings, window: 
     return features
 
 
-def score_records(
+def score_with_loaded_model(
     records: list[SwapObservation],
     settings: Settings,
-    artifact_path: str,
+    model: LoadedResearchModel,
 ) -> dict[str, Any]:
-    model = load_research_model(artifact_path, settings)
     ordered = sorted(records, key=lambda item: (item.block_number, item.log_index))
     features = latest_features(ordered, settings, model.window)
     normalized = [
@@ -196,6 +197,7 @@ def score_records(
         "automatic_action_enabled": False,
         "candidate_id": hashlib.sha256(identity.encode()).hexdigest(),
         "model_version": model.model_version,
+        "training_dataset_sha256": model.training_dataset_sha256,
         "chain_id": latest.chain_id,
         "pool_address": latest.pool_address,
         "as_of": cast(datetime, latest.timestamp).isoformat(),
@@ -208,6 +210,14 @@ def score_records(
         "high_volatility_candidate": score >= model.threshold,
         "warning": warning,
     }
+
+
+def score_records(
+    records: list[SwapObservation],
+    settings: Settings,
+    artifact_path: str,
+) -> dict[str, Any]:
+    return score_with_loaded_model(records, settings, load_research_model(artifact_path, settings))
 
 
 def score_dataset(dataset_path: str, artifact_path: str, settings: Settings) -> dict[str, Any]:

@@ -1,16 +1,35 @@
 from base64 import urlsafe_b64decode, urlsafe_b64encode
-from datetime import datetime
+from datetime import datetime, timezone
+import os
 
 from fastapi import FastAPI, HTTPException, Query
 
 from .config import Settings
-from .ingest import RpcSource
+from .ingest import RpcSource, SourceError
+from .model import SCORE_SCALE, load_dataset
 from .schemas import (AuditReport, CandidateUnavailable, HealthResponse, PublicConfig,
-                      PublicationDisabled, StatusComponent, SwapPage)
+                      PublicationDisabled, ResearchScore, StatusComponent, SwapObservation, SwapPage)
+from .scoring import LoadedResearchModel, load_research_model, score_with_loaded_model
 from .storage import Store
 
 settings = Settings.from_env()
 store = Store(settings.database_path)
+research_model: LoadedResearchModel | None = None
+research_records: list[SwapObservation] | None = None
+research_model_error: str | None = None
+research_dataset_path = os.environ.get("NB_RESEARCH_DATASET")
+if settings.model_artifact and research_dataset_path:
+    try:
+        research_model = load_research_model(settings.model_artifact, settings)
+        research_records, dataset_hash, _ = load_dataset(research_dataset_path, settings)
+        if dataset_hash != research_model.training_dataset_sha256:
+            raise SourceError("research dataset does not match model manifest")
+    except (SourceError, OSError):
+        research_model = None
+        research_records = None
+        research_model_error = "research model or verified dataset failed integrity checks"
+elif settings.model_artifact or research_dataset_path:
+    research_model_error = "configure both NB_MODEL_ARTIFACT and NB_RESEARCH_DATASET for offline research scoring"
 app = FastAPI(title="Neural Brake read-only API", version="0.1.0")
 
 
@@ -32,12 +51,19 @@ def _status() -> HealthResponse:
     rpc_configured = bool(settings.rpc_url)
     model_configured = bool(settings.model_artifact)
     deployment_configured = all((settings.registry_address, settings.reactive_address, settings.vault_address))
+    if research_model:
+        model_detail = "research artifact loaded; not approved for operational readiness"
+    elif research_model_error:
+        model_detail = research_model_error
+    elif not model_configured:
+        model_detail = "no validated model artifact loaded"
+    else:
+        model_detail = "artifact configured but not validated or loaded"
     components = {
         "store": StatusComponent(configured=True, available=True, detail="local SQLite store available"),
         "source_reader": StatusComponent(configured=rpc_configured, available=False,
             detail="not checked" if rpc_configured else "NB_RPC_URL is missing"),
-        "model": StatusComponent(configured=model_configured, available=False,
-            detail="no validated model artifact loaded" if not model_configured else "artifact configured but not validated or loaded"),
+        "model": StatusComponent(configured=model_configured, available=False, detail=model_detail),
         "deployments": StatusComponent(configured=deployment_configured, available=False,
             detail="no deployed integration verified" if not deployment_configured else "references configured but not verified"),
     }
@@ -60,6 +86,9 @@ def ready():
 def config():
     return PublicConfig(chain_id=settings.chain_id, pool_address=settings.pool_address,
         token0_address=settings.token0_address, token1_address=settings.token1_address, fee=settings.fee,
+        score_scale=str(SCORE_SCALE) if research_model else None,
+        model_version=research_model.model_version if research_model else None,
+        threshold=research_model.threshold if research_model else None,
         pool_selection="provisional; not deployment or integration proof", deployments={
             "score_registry": settings.registry_address, "reactive": settings.reactive_address, "vault": settings.vault_address,
         })
@@ -76,7 +105,27 @@ def swaps(cursor: str | None = None, limit: int = Query(default=50, ge=1, le=100
 
 @app.get("/api/v1/candidates/latest", response_model=CandidateUnavailable)
 def candidates_latest():
-    return {"items": [], "available": False, "reason": "no validated model artifact or computed candidates"}
+    reason = (
+        "only a read-only research score is available at /api/v1/research/latest-score; "
+        "no operational candidate is approved"
+        if research_model else "no validated model artifact or computed candidates"
+    )
+    return {"items": [], "available": False, "reason": reason}
+
+
+@app.get("/api/v1/research/latest-score", response_model=ResearchScore)
+def research_latest_score():
+    if research_model is None or research_records is None:
+        detail = research_model_error or "research-only model and verified snapshot are not configured"
+        raise HTTPException(503, detail)
+    try:
+        result = score_with_loaded_model(research_records, settings, research_model)
+    except SourceError as exc:
+        raise HTTPException(503, str(exc)) from exc
+    as_of = datetime.fromisoformat(result["as_of"])
+    result["input_age_seconds"] = max(0, int((datetime.now(timezone.utc) - as_of).total_seconds()))
+    result["snapshot_observation_count"] = len(research_records)
+    return result
 
 
 @app.get("/api/v1/candidates/{candidate_id}")
