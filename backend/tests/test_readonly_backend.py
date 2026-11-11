@@ -354,7 +354,7 @@ def _settings(database: str, rpc_url: str = "http://rpc.test", chain_id: int = C
         model_artifact=None, registry_address=None, reactive_address=None, vault_address=None)
 
 
-def _mock_rpc(monkeypatch, chain_id: int, block_hash: str):
+def _mock_rpc(monkeypatch, chain_id: int, block_hash: str, receipt_status: str = "0x1", receipt_log_data: str | None = None):
     log = _fixture_swap_log()
     original_client = httpx.AsyncClient
 
@@ -367,6 +367,12 @@ def _mock_rpc(monkeypatch, chain_id: int, block_hash: str):
             result = [log]
         elif method == "eth_getBlockByNumber":
             result = {"number": hex(56570453), "hash": block_hash, "timestamp": hex(1791234567)}
+        elif method == "eth_getTransactionReceipt":
+            receipt_log = dict(log)
+            if receipt_log_data is not None:
+                receipt_log["data"] = receipt_log_data
+            result = {"transactionHash": TX_HASH, "blockHash": block_hash,
+                "blockNumber": hex(56570453), "status": receipt_status, "logs": [receipt_log]}
         else:  # The mocked adapter must expose read-only JSON-RPC calls only.
             raise AssertionError(f"unexpected JSON-RPC method: {method}")
         return httpx.Response(200, json={"jsonrpc": "2.0", "id": body["id"], "result": result})
@@ -425,6 +431,24 @@ def test_ingest_rejects_block_hash_mismatch_without_persisting(monkeypatch, tmp_
     monkeypatch.setattr(Settings, "from_env", classmethod(lambda cls: settings))
     _mock_rpc(monkeypatch, CHAIN_ID, "0x" + "ef" * 32)
     with pytest.raises(SourceError, match="block hash"):
+        asyncio.run(_ingest(56570453, 56570453))
+    assert Store(path).audit()[0] == 0
+
+
+def test_ingest_rejects_failed_receipt_without_persisting(monkeypatch, tmp_path):
+    path = str(tmp_path / "failed-receipt.sqlite3")
+    monkeypatch.setattr(Settings, "from_env", classmethod(lambda cls: _settings(path)))
+    _mock_rpc(monkeypatch, CHAIN_ID, BLOCK_HASH, receipt_status="0x0")
+    with pytest.raises(SourceError, match="receipt failed"):
+        asyncio.run(_ingest(56570453, 56570453))
+    assert Store(path).audit()[0] == 0
+
+
+def test_ingest_rejects_receipt_bytes_mismatch_without_persisting(monkeypatch, tmp_path):
+    path = str(tmp_path / "mismatched-receipt.sqlite3")
+    monkeypatch.setattr(Settings, "from_env", classmethod(lambda cls: _settings(path)))
+    _mock_rpc(monkeypatch, CHAIN_ID, BLOCK_HASH, receipt_log_data="0x" + "00" * 160)
+    with pytest.raises(SourceError, match="differ from its receipt"):
         asyncio.run(_ingest(56570453, 56570453))
     assert Store(path).audit()[0] == 0
 

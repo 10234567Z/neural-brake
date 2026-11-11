@@ -128,6 +128,23 @@ class RpcSource:
         except (OverflowError, OSError, ValueError) as exc:
             raise SourceError("invalid RPC block identity or timestamp") from exc
 
+    async def get_receipt(self, tx_hash: str) -> dict:
+        if not HEX32.fullmatch(tx_hash):
+            raise SourceError("invalid Swap transaction hash")
+        async with httpx.AsyncClient(timeout=10) as client:
+            response = await client.post(self.settings.rpc_url, json={"jsonrpc": "2.0", "id": 4,
+                "method": "eth_getTransactionReceipt", "params": [tx_hash]})
+            response.raise_for_status()
+            data = response.json()
+        receipt = data.get("result") if isinstance(data, dict) else None
+        if (
+            not isinstance(data, dict) or data.get("error") or not isinstance(receipt, dict)
+            or not isinstance(receipt.get("transactionHash"), str)
+            or receipt["transactionHash"].lower() != tx_hash.lower()
+        ):
+            raise SourceError("Swap receipt is missing or mismatched")
+        return receipt
+
 
 async def _ingest(from_block: int, to_block: int) -> int:
     settings = Settings.from_env()
@@ -135,6 +152,7 @@ async def _ingest(from_block: int, to_block: int) -> int:
     logs = await source.get_logs(from_block, to_block)
     verified = []
     block_cache: dict[int, dict] = {}
+    receipt_cache: dict[str, dict] = {}
     for log in logs:
         if not isinstance(log, dict):
             raise SourceError("RPC returned a malformed log")
@@ -152,12 +170,41 @@ async def _ingest(from_block: int, to_block: int) -> int:
         block = block_cache[block_number]
         if not isinstance(log.get("blockHash"), str) or log["blockHash"].lower() != block["hash"]:
             raise SourceError("log block hash does not match RPC block")
-        verified.append(decode_swap_log(log, settings.chain_id, settings.pool_address, block["timestamp"]))
+        observation = decode_swap_log(log, settings.chain_id, settings.pool_address, block["timestamp"])
+        tx_hash = observation.transaction_hash
+        if tx_hash not in receipt_cache:
+            receipt_cache[tx_hash] = await source.get_receipt(tx_hash)
+        receipt = receipt_cache[tx_hash]
+        if receipt.get("status") != "0x1" or not isinstance(receipt.get("blockHash"), str) or receipt["blockHash"].lower() != block["hash"]:
+            raise SourceError("Swap receipt failed or belongs to another block")
+        try:
+            if int(receipt["blockNumber"], 16) != block_number or not isinstance(receipt["logs"], list):
+                raise ValueError
+            matches = [entry for entry in receipt["logs"] if int(entry["logIndex"], 16) == observation.log_index]
+        except (KeyError, TypeError, ValueError):
+            raise SourceError("Swap receipt has malformed log provenance") from None
+        if len(matches) != 1:
+            raise SourceError("Swap log is not unique in its successful receipt")
+        receipt_log = matches[0]
+        if (
+            not isinstance(receipt_log.get("address"), str)
+            or receipt_log["address"].lower() != settings.pool_address.lower()
+            or not isinstance(receipt_log.get("transactionHash"), str)
+            or receipt_log["transactionHash"].lower() != tx_hash
+            or not isinstance(receipt_log.get("blockHash"), str)
+            or receipt_log["blockHash"].lower() != block["hash"]
+            or not isinstance(receipt_log.get("topics"), list)
+            or not all(isinstance(topic, str) for topic in receipt_log["topics"])
+            or [topic.lower() for topic in receipt_log["topics"]] != [topic.lower() for topic in log["topics"]]
+            or not isinstance(receipt_log.get("data"), str)
+            or receipt_log["data"].lower() != log["data"].lower()
+        ):
+            raise SourceError("Swap event bytes/provenance differ from its receipt")
+        verified.append(observation)
 
     # Persist only after all records in this bounded response have passed validation.
     store = Store(settings.database_path)
-    for observation in verified:
-        store.add_swap(observation)
+    store.add_swaps(verified)
     return len(verified)
 
 
