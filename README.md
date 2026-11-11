@@ -10,11 +10,14 @@ This workspace contains a local read-only API, a responsive dashboard, Solidity 
 
 - The selected source is the Base Sepolia Uniswap v3 USDC/WETH 0.3% pool, `0x46880b404CD35c165EDdefF7421019F8dD25F4Ad`.
 - A full Blockscout history pagination run returned 28,727 Swap logs from 2024-02-14 through 2026-11-11. Every returned log was matched to a successful RPC receipt and block header; independent proof that the explorer omitted no logs is still outstanding.
+- A separate opt-in observer can scan newer confirmed block ranges, validate returned Swap receipts, and update the local cache. It does not prove RPC completeness or run live neural inference.
 - The offline neural model passed only the trainer's minimum holdout gate on that snapshot. Test precision was 5.0% (77 true positives, 1,455 false positives); that is weak evidence, not a model suitable for automated pausing. A local opt-in research endpoint can show a score from the exact snapshot; no operational candidate is approved.
 - The API's publication route returns `503`. No signer, operator approval flow, deployed registry/Reactive/vault contracts, callback transaction, or paused vault exists.
 - Contracts and local tests do not demonstrate a live cross-chain integration. The vault accepts no assets and must never be used to protect funds.
 
 See [`docs/source-audit.md`](docs/source-audit.md) for pool provenance, verified history scope and model metrics; [`contracts/NOTE.md`](contracts/NOTE.md) for deployment-order and integration constraints; and [`SECURITY.md`](SECURITY.md) for operational limits.
+
+For the no-value testnet rehearsal, see [`contracts/DEPLOYMENT.md`](contracts/DEPLOYMENT.md). Its Foundry scripts are dry-run only unless an operator explicitly passes `--broadcast`; no deployment is currently claimed.
 
 ## Local development
 
