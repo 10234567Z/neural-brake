@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "neural-brake-backend"
+version = "0.1.0"
+description = "Fail-closed, read-only Neural Brake API"
+requires-python = ">=3.13"
+dependencies = ["fastapi==0.162.2", "httpx==0.28.1", "uvicorn[standard]==0.54.0"]
+
+[project.optional-dependencies]
+test = ["pytest==8.4.2"]
+model = ["torch==2.9.1+cpu", "numpy==2.3.5"]
+
+[project.scripts]
+neural-brake-audit = "neural_brake.audit:main"
+neural-brake-ingest = "neural_brake.ingest:main"
+neural-brake-verify-history = "neural_brake.verify_history:main"
+neural-brake-train = "neural_brake.model:main"
+neural-brake-export-swaps = "neural_brake.export_dataset:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
