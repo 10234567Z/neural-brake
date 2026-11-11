@@ -9,12 +9,12 @@ Licensed under [MIT](LICENSE).
 This workspace contains a local read-only API, a responsive dashboard, Solidity contracts with isolated behavior tests, and an offline PyTorch training pipeline. It is **not yet a functioning deployed circuit breaker**:
 
 - The selected source is the Base Sepolia Uniswap v3 USDC/WETH 0.3% pool, `0x46880b404CD35c165EDdefF7421019F8dD25F4Ad`.
-- The read API can decode and cache genuine Swap events. A one-event read-path check was verified against Base Sepolia RPC.
-- The offline model experiment on a provider-limited snapshot failed its untouched chronological holdout. The model is not loaded; the API reports no candidates.
+- A full Blockscout history pagination run returned 28,727 Swap logs from 2024-02-14 through 2026-11-11. Every returned log was matched to a successful RPC receipt and block header; independent proof that the explorer omitted no logs is still outstanding.
+- The offline neural model passed only the trainer's minimum holdout gate on that snapshot. Test precision was 5.0% (77 true positives, 1,455 false positives); that is weak evidence, not a model suitable for automated pausing. The artifact is not loaded; the API reports no candidates.
 - The API's publication route returns `503`. No signer, operator approval flow, deployed registry/Reactive/vault contracts, callback transaction, or paused vault exists.
 - Contracts and local tests do not demonstrate a live cross-chain integration. The vault accepts no assets and must never be used to protect funds.
 
-See [`docs/source-audit.md`](docs/source-audit.md) for pool provenance, data limits and the failed holdout result; [`contracts/NOTE.md`](contracts/NOTE.md) for deployment-order and integration constraints; and [`SECURITY.md`](SECURITY.md) for operational limits.
+See [`docs/source-audit.md`](docs/source-audit.md) for pool provenance, verified history scope and model metrics; [`contracts/NOTE.md`](contracts/NOTE.md) for deployment-order and integration constraints; and [`SECURITY.md`](SECURITY.md) for operational limits.
 
 ## Local development
 
@@ -62,14 +62,14 @@ python3 -m pip install -e '.[model]' --extra-index-url https://download.pytorch.
 neural-brake-train --dataset /path/to/verified-swaps.jsonl --output /path/to/neural-brake.pt
 ```
 
-The trainer uses chronological train/validation/test partitions, derives the volatility-label cutoff from training data only, and chooses a candidate score threshold on validation. It refuses an operational artifact if the heldout set fails the minimum gate. `--allow-research-artifact` is only for an explicitly marked offline experiment and must not be used for live scoring or publication. The current observed model fails the holdout; do not lower its threshold or tune against the test split to force an alert.
+The trainer uses chronological train/validation/test partitions, derives the volatility-label cutoff from training data only, and chooses a candidate score threshold on validation. It refuses an operational artifact if the heldout set fails the minimum gate. `--allow-research-artifact` is only for an explicitly marked offline experiment and must not be used for live scoring or publication. The current candidate passes that minimal gate but has only 5.0% test precision and many false positives; it is not loaded or approved for automated action. Do not tune against its already-observed test split.
 
 ## Before enabling any write
 
-1. Obtain a complete, receipt-verified history for the selected pool using an archive-capable provider. The current PublicNode snapshot omitted older real pool activity; see the audit.
-2. Establish a model that passes a fresh chronological holdout on complete, real observations. Freeze features, model hash and threshold before a live event.
+1. The full Blockscout pagination was receipt/header verified, but independent source-completeness reconciliation remains open. The configured RPC's free plan restricts `eth_getLogs` ranges; use a suitable independent source before claiming chain-wide completeness.
+2. Establish useful model performance—not just the minimum gate—on a fresh, real chronological holdout. The latest test split has already been observed and must not be tuned against. Freeze features, model hash and threshold before a live event.
 3. Confirm the precise Reactive callback route, addresses and funding requirements against current official documentation. Deploy registry, Reactive contract and no-value vault only on the supported development networks, with explicit owner approval.
 4. Implement operator authentication, approved signer custody, idempotent publication and safe reconciliation before enabling writes. Never place keys in the browser, repository, logs or chat.
 5. Independently reconcile the source event, score publication receipt, Reactive callback transaction and authoritative vault state. A dashboard status or local test is not proof of the full loop.
 
-No production safety, model effectiveness, deployment, public repository, or completed cross-chain loop is claimed here.
+The repository is public, but no production safety, useful model effectiveness, deployment, or completed cross-chain loop is claimed here.

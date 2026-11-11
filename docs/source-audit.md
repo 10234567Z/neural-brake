@@ -1,6 +1,6 @@
 # Source and model audit
 
-This product audit records observed chain data and validation results. It is not a claim of full historical coverage, model effectiveness, production readiness, or a deployed cross-chain circuit breaker.
+This product audit records the latest paginated history import and chronological model result. It is not a proof that the explorer omitted no chain logs, model effectiveness, production readiness, or a deployed cross-chain circuit breaker.
 
 ## Selected source
 
@@ -15,17 +15,15 @@ These identities were checked against the [Uniswap deployment feed](https://deve
 
 ## Observed data and limits
 
-The first 80 pages of the [pool log index](https://base-sepolia.blockscout.com/api/v2/addresses/0x46880b404CD35c165EDdefF7421019F8dD25F4Ad/logs) contained 2,947 Swap logs in 2,941 transactions, from `2026-09-09T00:03:16Z` through an explorer-reported `2026-11-10T12:46:00Z`; the API reported another page, so this is not a full count. The latest reported item was not independently verified.
+On 2026-11-11, the [pool log index](https://base-sepolia.blockscout.com/api/v2/addresses/0x46880b404CD35c165EDdefF7421019F8dD25F4Ad/logs) was paginated to exhaustion: 356 pages at 100 log items per page. It returned 28,727 Swap logs across 28,617 transactions and 20,399 blocks, from `2024-02-14T19:54:44Z` to `2026-11-11T16:33:05Z`. The configured RPC verified every transaction receipt and corresponding block header, including exact event bytes, successful receipt status, block hash and timestamp. For 357 explorer items with an empty transaction hash, the transaction was recovered only after matching the same block/log index/event bytes through RPC; those receipts were then verified normally. The result was written atomically to a fresh local SQLite database and exported as JSONL with SHA-256 `7e59e30941e45c9bc889e3b276e7d652990c6eec83e8361c3e9e867c0dcc06ff`.
 
-A read-only `eth_getLogs` scan through block `56,964,027` in 233 ranges returned 2,410 logs across 2,406 transactions and 2,252 blocks. Every returned log passed the Uniswap ABI checks and its block hash matched an `eth_getBlockByNumber` response from `base-sepolia-rpc.publicnode.com`. The observed range was `2026-09-18T23:46:54Z` to `2026-11-10T10:28:16Z`; median interval was 32 seconds, maximum 65,376 seconds. This snapshot is temporary and is not complete lifetime history.
-
-The RPC provider omitted an earlier pool log: the official Base Sepolia RPC independently returned a real Swap at block `46,550,447`, log index 23, transaction `0xc97a6a8f0bd5497e145d2834272a29529251f97b5ba18665e7dcbb60ae7a1314`, block hash `0x1b6e09a5fa4a819f24373a8cafd25034d75776c233ad22e848bdbcf744982cbf`, timestamp `2026-09-08T12:06:22Z`. The Blockscout and RPC snapshots also differed on some event keys. Complete history and indexer reconciliation remain unresolved. A historical receipt import attempt did not complete, and it persisted no rows.
+This establishes that every Swap returned by the exhausted Blockscout pagination was receipt/header verified. It does **not** independently prove that Blockscout indexed every on-chain Swap. The configured RPC's free plan permits only 10 blocks per `eth_getLogs` request, and the public Base Sepolia RPC reports a 200-block limit, so an independent full-range RPC comparison was not performed. An earlier PublicNode scan missed a real Swap at block `46,550,447`, illustrating that a single provider can omit older activity. Finality/reorg coverage is not claimed.
 
 ## Offline model evaluation
 
-A reproducible exploratory model was trained on the 2,410-observation temporary snapshot. Features used 10 previous swaps (log-price return, elapsed time and trade direction); labels used future 10-swap realized volatility, with a 90th-percentile cutoff from training only. The split was chronological 70/15/15: 1,667 train, 351 validation and 352 test samples. A score threshold of 8,838/10,000 was selected on validation.
+A reproducible small PyTorch classifier was trained offline on the 28,727-record snapshot. Features use the preceding 10 swaps (log-price return, elapsed time and trade direction); the label is future 10-swap realized volatility above the training-only 90th percentile. Chronological splits were 20,088 train, 4,299 validation and 4,300 test samples. The score threshold was selected on validation at `7,714/10,000`.
 
-On the untouched test partition, 11 samples were positive. Results were TP 0, FP 112, FN 11, TN 229, F1 0.0 and balanced accuracy 0.336. The held-out result fails to establish useful generalization. Repeated runs produced the same weights hash and model version `b575ab3f13e70815af9ba27ba7a483746e43c1491361a2722286b30cf126b397`. Artifacts were written only under `/tmp`, are not distributed or loaded, and must not be used for live scoring. Do not tune against this test split.
+The untouched test partition produced TP 77, FP 1,455, FN 85, TN 2,683; precision `0.0503`, recall `0.4753`, F1 `0.0909`, balanced accuracy `0.5618`. It passes the code's minimum gate (at least one TP and balanced accuracy above 0.5), but its 5% precision and high false-positive count are weak evidence and unsuitable for an automated pause decision. The candidate model version is `53059c36681354a9c04a94ca3962eccd3c9d398cbb76206e9a513a4e09ab3050`; dataset SHA-256 is `7e59e30941e45c9bc889e3b276e7d652990c6eec83e8361c3e9e867c0dcc06ff`. Artifact/manifest exist only under `/tmp`; they are not committed or loaded by the API. This test split has now been observed; do not tune against it. A revised model needs a fresh independent holdout.
 
 ## Reactive path
 
