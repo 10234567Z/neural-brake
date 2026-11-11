@@ -1,17 +1,20 @@
 """TEST-ONLY fixtures; they are never product observations or model inputs."""
 
 import asyncio
+import hashlib
 import json
 import sqlite3
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import httpx
 import pytest
 from fastapi.testclient import TestClient
 
 from neural_brake import api
-from neural_brake.config import Settings
+from neural_brake.config import PROVISIONAL_TOKEN0, PROVISIONAL_TOKEN1, Settings
 from neural_brake.ingest import SWAP_TOPIC, RpcSource, SourceError, _ingest, decode_swap_log
+from neural_brake.model import FEATURE_SCHEMA, SCORE_SCALE, _weights_sha256
+from neural_brake.scoring import load_research_model, score_records
 from neural_brake.storage import Store
 from neural_brake.verify_history import (
     _get_page, _history_endpoint, _page_params, _pool_log, _post, _recover_transaction_hash, _rpc_batches,
@@ -22,6 +25,73 @@ CHAIN_ID = 84532
 POOL = "0x46880b404CD35c165EDdefF7421019F8dD25F4Ad"
 BLOCK_HASH = "0x" + "ab" * 32
 TX_HASH = "0x" + "cd" * 32
+
+
+def _research_settings(database: str) -> Settings:
+    return Settings(
+        rpc_url="http://rpc.test", database_path=database, chain_id=CHAIN_ID, pool_address=POOL,
+        token0_address=PROVISIONAL_TOKEN0, token1_address=PROVISIONAL_TOKEN1,
+        token0_decimals=6, token1_decimals=18, fee=3000,
+        model_artifact=None, registry_address=None, reactive_address=None, vault_address=None,
+    )
+
+
+def _test_research_artifact(tmp_path, settings: Settings) -> str:
+    torch = pytest.importorskip("torch")
+    from neural_brake.scoring import _canonical_hash
+
+    torch.manual_seed(7)
+    model = torch.nn.Sequential(torch.nn.Linear(30, 16), torch.nn.Tanh(), torch.nn.Linear(16, 1))
+    state_dict = model.state_dict()
+    artifact = tmp_path / "research.pt"
+    torch.save({
+        "state_dict": state_dict,
+        "feature_mean": [0.0] * 30,
+        "feature_scale": [1.0] * 30,
+        "window": 10,
+        "horizon": 10,
+        "score_threshold": 5000,
+        "score_scale": SCORE_SCALE,
+        "feature_schema": FEATURE_SCHEMA,
+    }, artifact)
+    manifest_core = {
+        "weights_sha256": _weights_sha256(state_dict, torch),
+        "dataset_sha256": "a" * 64,
+        "chain_id": settings.chain_id,
+        "pool_address": settings.pool_address.lower(),
+        "token0_address": settings.token0_address.lower(),
+        "token1_address": settings.token1_address.lower(),
+        "token_decimals": [settings.token0_decimals, settings.token1_decimals],
+        "feature_schema": FEATURE_SCHEMA,
+        "feature_window_swaps": 10,
+        "label_horizon_swaps": 10,
+        "score_scale": SCORE_SCALE,
+        "validated_score_threshold": 5000,
+        "holdout_gate": "passed-pending-operator-review",
+        "test_metrics": {"precision": 0.05},
+    }
+    manifest_hash = _canonical_hash(manifest_core)
+    manifest = {
+        **manifest_core,
+        "artifact_sha256": hashlib.sha256(artifact.read_bytes()).hexdigest(),
+        "manifest_sha256": manifest_hash,
+        "model_version": hashlib.sha256(f"{manifest_core['weights_sha256']}{manifest_hash}".encode()).hexdigest(),
+    }
+    artifact.with_suffix(artifact.suffix + ".manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+    return str(artifact)
+
+
+def _timestamped_observations(count: int) -> list:
+    records = []
+    start = datetime(2026, 11, 9, 14, 52, 39, tzinfo=timezone.utc)
+    for index in range(count):
+        log = _fixture_swap_log()
+        log["blockNumber"] = hex(56570453 + index)
+        log["blockHash"] = "0x" + f"{index + 1:064x}"
+        log["transactionHash"] = "0x" + f"{index + 2:064x}"
+        log["logIndex"] = "0x0"
+        records.append(decode_swap_log(log, CHAIN_ID, POOL, start + timedelta(seconds=index)))
+    return records
 
 
 def _word(value: int, signed: bool = False) -> str:
@@ -129,6 +199,30 @@ def test_rpc_batches_are_throttled_between_provider_sized_batches(monkeypatch):
     assert batch_sizes == [25, 16]
     assert len(batches) == 2
     assert sleeps == [RPC_BATCH_DELAY]
+
+
+def test_research_model_scores_latest_swaps_without_enabling_actions(tmp_path):
+    settings = _research_settings(str(tmp_path / "research.sqlite3"))
+    artifact = _test_research_artifact(tmp_path, settings)
+    result = score_records(_timestamped_observations(11), settings, artifact)
+
+    assert result["status"] == "research_only"
+    assert result["automatic_action_enabled"] is False
+    assert 0 <= result["risk_score"] <= result["score_scale"]
+    assert result["threshold"] == 5000
+    assert isinstance(result["high_volatility_candidate"], bool)
+    assert len(result["candidate_id"]) == 64
+    assert "not approved to pause deposits" in result["warning"]
+
+
+def test_research_model_rejects_tampered_artifact(tmp_path):
+    settings = _research_settings(str(tmp_path / "research.sqlite3"))
+    artifact = _test_research_artifact(tmp_path, settings)
+    with open(artifact, "ab") as output:
+        output.write(b"tamper")
+
+    with pytest.raises(SourceError, match="artifact checksum"):
+        load_research_model(artifact, settings)
 
 
 def test_history_endpoint_uses_authenticated_multichain_api_without_key_in_url():

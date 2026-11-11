@@ -18,6 +18,7 @@ neural-brake-audit = "neural_brake.audit:main"
 neural-brake-ingest = "neural_brake.ingest:main"
 neural-brake-verify-history = "neural_brake.verify_history:main"
 neural-brake-train = "neural_brake.model:main"
+neural-brake-score = "neural_brake.scoring:main"
 neural-brake-export-swaps = "neural_brake.export_dataset:main"
 
 [tool.setuptools.packages.find]
