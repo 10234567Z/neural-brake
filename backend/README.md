@@ -12,6 +12,7 @@ Configure using these application environment names (secrets are not stored in t
 |---|---|---|
 | `NB_RPC_URL` | Optional for serving; required to enable the explicit read-only source adapter. Use an operator-controlled Base Sepolia JSON-RPC URL. | unset |
 | `NB_BLOCKSCOUT_API_KEY` | Optional for historical import when the key's plan supports Base Sepolia. Uses Blockscout's authenticated multichain API instead of the public explorer endpoint. Store only in the runtime environment/ignored local `.env`. | unset |
+| `NB_LASNA_RPC_URL` | Optional Reactive Lasna read-only RPC for `neural-brake-preflight`. No signer is used. | `https://lasna-rpc.rnk.dev/` |
 | `NB_DATABASE_PATH` | Local SQLite file path. | `./neural_brake.sqlite3` |
 | `NB_CHAIN_ID` | Expected RPC chain identity. | `84532` |
 | `NB_POOL_ADDRESS` | Pool queried by the source adapter. | provisional `0x46880b404CD35c165EDdefF7421019F8dD25F4Ad` |
@@ -40,6 +41,8 @@ uvicorn neural_brake.api:app
 ```
 
 The dataset hash must match the model manifest. The score remains research-only; no ingestion worker, transaction signing, publication, or pause is enabled.
+
+Before planning any testnet deployment, run `neural-brake-preflight` with `NB_RPC_URL` set to a Base Sepolia RPC. This read-only check verifies Base Sepolia/Lasna chain identities, code at the current documented factory, pool, callback proxy and System addresses, plus the pool's token order, fee and factory lookup. It does not verify funding, a signer, deployed project contracts, callback delivery, or vault state. The documented network addresses must be rechecked immediately before deployment; never put keys in this command.
 
 `neural_brake.ingest.RpcSource` provides a bounded (`<= 2001` blocks), read-only JSON-RPC log query and strict Uniswap v3 Swap event decoder. It verifies RPC chain ID, pool address, event signature, and the two canonical indexed address topics; rejects removed logs and malformed/noncanonical ABI fields. Ingestion fetches each distinct referenced block, requires the returned block number/hash to match the log, and stores that block's actual UTC timestamp. The bounded range is validated before any returned records are persisted. Run `neural-brake-ingest --from-block N --to-block M` to explicitly query and cache a bounded range; it does not run as a worker and does not assert finality, completeness, or current live activity. The stored observations are a cache, not chain authority.
 
