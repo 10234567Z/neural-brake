@@ -140,17 +140,56 @@ def _pool_log(item: dict[str, Any], pool: str) -> dict[str, Any] | None:
         explorer_time = datetime.fromisoformat(item["block_timestamp"].replace("Z", "+00:00"))
     except (KeyError, AttributeError, TypeError, ValueError) as exc:
         raise SourceError("explorer returned malformed Swap provenance") from exc
-    if block_number < 0 or log_index < 0 or len(block_hash) != 66 or len(tx_hash) != 66:
+    if block_number < 0 or log_index < 0 or len(block_hash) != 66 or (tx_hash and len(tx_hash) != 66):
         raise SourceError("explorer returned invalid Swap provenance")
     return {
         "block_number": block_number,
         "block_hash": block_hash,
-        "transaction_hash": tx_hash,
+        "transaction_hash": tx_hash or None,
         "log_index": log_index,
         "timestamp": explorer_time.astimezone(timezone.utc),
         "topics": [topic.lower() for topic in topics],
         "data": data.lower(),
     }
+
+
+async def _recover_transaction_hash(
+    client: httpx.AsyncClient,
+    rpc_url: str,
+    chain_id: int,
+    pool: str,
+    expected: dict[str, Any],
+) -> str:
+    block_number = expected["block_number"]
+    logs = await _rpc(client, rpc_url, "eth_getLogs", [{
+        "fromBlock": hex(block_number),
+        "toBlock": hex(block_number),
+        "address": pool,
+        "topics": [SWAP_TOPIC],
+    }])
+    if not isinstance(logs, list):
+        raise SourceError("RPC returned malformed logs while recovering transaction provenance")
+
+    matches = []
+    for log in logs:
+        if not isinstance(log, dict):
+            raise SourceError("RPC returned a malformed log while recovering transaction provenance")
+        try:
+            observation = decode_swap_log(log, chain_id, pool)
+        except SourceError:
+            raise SourceError("RPC returned an invalid Swap while recovering transaction provenance") from None
+        if observation.block_number != block_number or observation.log_index != expected["log_index"]:
+            continue
+        if (
+            observation.block_hash != expected["block_hash"]
+            or [topic.lower() for topic in log["topics"]] != expected["topics"]
+            or log["data"].lower() != expected["data"]
+        ):
+            raise SourceError("RPC Swap differs from the explorer event missing its transaction hash")
+        matches.append(observation.transaction_hash)
+    if len(matches) != 1:
+        raise SourceError("RPC did not uniquely resolve the explorer event missing its transaction hash")
+    return matches[0]
 
 
 async def verify_history(since: datetime, max_pages: int = 1000, page_delay: float = 0.8) -> dict[str, Any]:
@@ -172,6 +211,7 @@ async def verify_history(since: datetime, max_pages: int = 1000, page_delay: flo
 
         cursor: dict[str, int] | None = None
         swaps: dict[tuple[int, str, int], dict[str, Any]] = {}
+        recovered_tx_hashes = 0
         pages = 0
         previous_oldest_block: int | None = None
         reached_boundary = False
@@ -194,6 +234,11 @@ async def verify_history(since: datetime, max_pages: int = 1000, page_delay: flo
                 log = _pool_log(item, settings.pool_address)
                 if log is None:
                     continue
+                if log["transaction_hash"] is None:
+                    log["transaction_hash"] = await _recover_transaction_hash(
+                        client, settings.rpc_url, settings.chain_id, settings.pool_address, log
+                    )
+                    recovered_tx_hashes += 1
                 key = (log["block_number"], log["transaction_hash"], log["log_index"])
                 if key in swaps:
                     raise SourceError("duplicate source log across history pages")
@@ -222,7 +267,12 @@ async def verify_history(since: datetime, max_pages: int = 1000, page_delay: flo
         if not swaps:
             raise SourceError("no Swap logs were returned for the selected pool")
 
-        print(f"Fetched {pages} indexed pages with {len(swaps)} unique Swap logs; verifying RPC receipts and headers.", flush=True)
+        print(
+            f"Fetched {pages} indexed pages with {len(swaps)} unique Swap logs; "
+            f"recovered {recovered_tx_hashes} missing transaction hash(es) from RPC logs; "
+            "verifying RPC receipts and headers.",
+            flush=True,
+        )
 
         # Verify receipts (including log bytes/index and successful execution) in bounded batches.
         logs_by_tx: dict[str, list[tuple[tuple[int, str, int], dict[str, Any]]]] = {}
@@ -299,6 +349,7 @@ async def verify_history(since: datetime, max_pages: int = 1000, page_delay: flo
         "pages": pages,
         "transactions_verified": len(receipts),
         "swap_logs_verified": len(verified),
+        "rpc_recovered_transaction_hashes": recovered_tx_hashes,
         "first_timestamp": timestamps[0].isoformat() if timestamps else None,
         "last_timestamp": timestamps[-1].isoformat() if timestamps else None,
         "source": "Blockscout pagination; every Swap matched to official Base Sepolia RPC receipt and block header",

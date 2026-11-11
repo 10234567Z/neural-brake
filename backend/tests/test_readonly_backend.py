@@ -12,7 +12,9 @@ from neural_brake import api
 from neural_brake.config import Settings
 from neural_brake.ingest import SWAP_TOPIC, RpcSource, SourceError, _ingest, decode_swap_log
 from neural_brake.storage import Store
-from neural_brake.verify_history import _get_page, _history_endpoint, _page_params, _pool_log, _post
+from neural_brake.verify_history import (
+    _get_page, _history_endpoint, _page_params, _pool_log, _post, _recover_transaction_hash,
+)
 
 CHAIN_ID = 84532
 POOL = "0x46880b404CD35c165EDdefF7421019F8dD25F4Ad"
@@ -65,6 +67,43 @@ def test_blockscout_null_topic_slot_is_normalized_for_receipt_verification():
     item["topics"] = raw["topics"] + ["0x" + "00" * 32]
     with pytest.raises(SourceError, match="topic list"):
         _pool_log(item, POOL)
+
+
+def test_pool_log_marks_empty_transaction_hash_for_rpc_recovery():
+    raw = _fixture_swap_log()
+    item = {
+        "address": {"hash": POOL},
+        "topics": raw["topics"],
+        "data": raw["data"],
+        "block_number": int(raw["blockNumber"], 16),
+        "block_hash": BLOCK_HASH,
+        "transaction_hash": "",
+        "index": 7,
+        "block_timestamp": "2026-11-09T14:52:39Z",
+    }
+    normalized = _pool_log(item, POOL)
+    assert normalized is not None
+    assert normalized["transaction_hash"] is None
+
+
+def test_recovers_missing_explorer_transaction_hash_from_matching_rpc_log():
+    expected = {
+        "block_number": 56570453,
+        "block_hash": BLOCK_HASH,
+        "log_index": 7,
+        "topics": _fixture_swap_log()["topics"],
+        "data": _fixture_swap_log()["data"],
+    }
+
+    class MockClient:
+        async def post(self, url, json):
+            assert json["method"] == "eth_getLogs"
+            assert json["params"][0]["fromBlock"] == hex(56570453)
+            request = httpx.Request("POST", url)
+            return httpx.Response(200, json={"result": [_fixture_swap_log()]}, request=request)
+
+    result = asyncio.run(_recover_transaction_hash(MockClient(), "https://rpc.test", CHAIN_ID, POOL, expected))
+    assert result == TX_HASH.lower()
 
 
 def test_history_endpoint_uses_authenticated_multichain_api_without_key_in_url():
