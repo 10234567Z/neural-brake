@@ -9,6 +9,7 @@ import argparse
 import asyncio
 from datetime import datetime, timezone
 import json
+import os
 from typing import Any
 
 import httpx
@@ -17,8 +18,16 @@ from .config import Settings
 from .ingest import SWAP_TOPIC, SourceError, decode_swap_log
 from .storage import Store
 
-BLOCKSCOUT = "https://base-sepolia.blockscout.com/api/v2/addresses"
+BLOCKSCOUT_EXPLORER = "https://base-sepolia.blockscout.com/api/v2/addresses"
+BLOCKSCOUT_API = "https://api.blockscout.com"
 BATCH_SIZE = 50
+
+
+def _history_endpoint(chain_id: int, pool: str, api_key: str | None) -> tuple[str, dict[str, str]]:
+    if api_key:
+        url = f"{BLOCKSCOUT_API}/{chain_id}/api/v2/addresses/{pool}/logs"
+        return url, {"Authorization": f"Bearer {api_key}"}
+    return f"{BLOCKSCOUT_EXPLORER}/{pool}/logs", {}
 
 
 async def _post(client: httpx.AsyncClient, url: str, payload: Any) -> Any:
@@ -147,12 +156,13 @@ async def verify_history(since: datetime, max_pages: int = 1000, page_delay: flo
     if settings.chain_id != 84532:
         raise SourceError("historical verifier is restricted to the selected Base Sepolia source")
 
-    async with httpx.AsyncClient(timeout=60) as client:
+    api_key = os.environ.get("NB_BLOCKSCOUT_API_KEY")
+    endpoint, request_headers = _history_endpoint(settings.chain_id, settings.pool_address, api_key)
+    async with httpx.AsyncClient(timeout=60, headers=request_headers) as client:
         chain_id = int(await _rpc(client, settings.rpc_url, "eth_chainId", []), 16)
         if chain_id != settings.chain_id:
             raise SourceError("RPC chain identity mismatch")
 
-        endpoint = f"{BLOCKSCOUT}/{settings.pool_address}/logs"
         cursor: dict[str, int] | None = None
         swaps: dict[tuple[int, str, int], dict[str, Any]] = {}
         pages = 0

@@ -11,6 +11,7 @@ Configure using these application environment names (secrets are not stored in t
 | Variable | Required/use | Default |
 |---|---|---|
 | `NB_RPC_URL` | Optional for serving; required to enable the explicit read-only source adapter. Use an operator-controlled Base Sepolia JSON-RPC URL. | unset |
+| `NB_BLOCKSCOUT_API_KEY` | Optional for historical import. Uses Blockscout's authenticated multichain API instead of the public explorer endpoint. Store only in the runtime environment/ignored local `.env`. | unset |
 | `NB_DATABASE_PATH` | Local SQLite file path. | `./neural_brake.sqlite3` |
 | `NB_CHAIN_ID` | Expected RPC chain identity. | `84532` |
 | `NB_POOL_ADDRESS` | Pool queried by the source adapter. | provisional `0x46880b404CD35c165EDdefF7421019F8dD25F4Ad` |
@@ -20,7 +21,7 @@ Configure using these application environment names (secrets are not stored in t
 | `NB_MODEL_ARTIFACT` | Future model artifact location; configuring a path does not load or validate a model. | unset |
 | `NB_SCORE_REGISTRY_ADDRESS`, `NB_REACTIVE_ADDRESS`, `NB_VAULT_ADDRESS` | Future deployment references; configured references are not verified deployments. | unset |
 
-RPC URL values may contain credentials and must be provided through the runtime environment/secret manager, never committed. No signer/private-key environment variable is defined because publishing is disabled.
+RPC URL and Blockscout API key values may contain credentials and must be provided through the runtime environment/secret manager, never committed. No signer/private-key environment variable is defined because publishing is disabled. A free Blockscout API key is available at [dev.blockscout.com](https://dev.blockscout.com); see [official API authorization and route docs](https://docs.blockscout.com/devs/blockscout-api-responses-and-routes).
 
 ## API and data
 
@@ -28,7 +29,7 @@ Implements the proposed `GET /api/v1/health/live`, `/health/ready`, `/config`, `
 
 `neural_brake.ingest.RpcSource` provides a bounded (`<= 2001` blocks), read-only JSON-RPC log query and strict Uniswap v3 Swap event decoder. It verifies RPC chain ID, pool address, event signature, and the two canonical indexed address topics; rejects removed logs and malformed/noncanonical ABI fields. Ingestion fetches each distinct referenced block, requires the returned block number/hash to match the log, and stores that block's actual UTC timestamp. The bounded range is validated before any returned records are persisted. Run `neural-brake-ingest --from-block N --to-block M` to explicitly query and cache a bounded range; it does not run as a worker and does not assert finality, completeness, or current live activity. The stored observations are a cache, not chain authority.
 
-For a bounded historical audit, `NB_RPC_URL=https://sepolia.base.org neural-brake-verify-history --since 2026-09-18T00:00:00Z` paginates the selected Base Sepolia pool's Blockscout event index down to the requested UTC cutoff, then verifies each included Swap byte-for-byte against a successful transaction receipt and its timestamp/block hash against the official Base Sepolia RPC before persisting. It rate-limits page reads, uses bounded JSON-RPC batches, and aborts without adding rows if pagination, receipt, ABI, block hash or timestamp validation fails. This is an explicit audit/import, not a live worker. The RPC must retain historical receipts for the requested pool; this procedure does not claim full lifetime history, finality or a successful Reactive callback. The local execution attempts timed out while verifying all receipts/headers, so a complete import has **not** been established by that script yet.
+For a bounded historical audit, `neural-brake-verify-history --since 2026-09-18T00:00:00Z` paginates the selected Base Sepolia pool's Blockscout event index down to the requested UTC cutoff, then verifies each included Swap byte-for-byte against a successful transaction receipt and its timestamp/block hash against the configured Base Sepolia RPC before persisting. Set `NB_BLOCKSCOUT_API_KEY` to use the authenticated multichain API; without it the command uses the public Base Sepolia explorer. The command rate-limits page reads, retries bounded transient transport failures, uses bounded JSON-RPC batches, and aborts without adding rows if pagination, receipt, ABI, block hash or timestamp validation fails. This is an explicit audit/import, not a live worker. The RPC must retain historical receipts for the requested pool; this procedure does not claim finality or a successful Reactive callback. A full-history run was still in progress when the local execution limit was reached; no complete import has been established yet.
 
 Export successfully verified cached records with `neural-brake-export-swaps --output /path/to/source.jsonl`. The exporter filters to the configured chain and pool, requires actual timestamps, and emits a data hash. The export path is created only when explicitly requested; the repository does not seed or ship product observations.
 

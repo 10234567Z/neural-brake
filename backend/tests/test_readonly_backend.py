@@ -12,7 +12,7 @@ from neural_brake import api
 from neural_brake.config import Settings
 from neural_brake.ingest import SWAP_TOPIC, RpcSource, SourceError, _ingest, decode_swap_log
 from neural_brake.storage import Store
-from neural_brake.verify_history import _get_page, _pool_log, _post
+from neural_brake.verify_history import _get_page, _history_endpoint, _pool_log, _post
 
 CHAIN_ID = 84532
 POOL = "0x46880b404CD35c165EDdefF7421019F8dD25F4Ad"
@@ -65,6 +65,18 @@ def test_blockscout_null_topic_slot_is_normalized_for_receipt_verification():
     item["topics"] = raw["topics"] + ["0x" + "00" * 32]
     with pytest.raises(SourceError, match="topic list"):
         _pool_log(item, POOL)
+
+
+def test_history_endpoint_uses_authenticated_multichain_api_without_key_in_url():
+    key = "proapi-test-secret"
+    url, headers = _history_endpoint(CHAIN_ID, POOL, key)
+    assert url == f"https://api.blockscout.com/{CHAIN_ID}/api/v2/addresses/{POOL}/logs"
+    assert headers == {"Authorization": f"Bearer {key}"}
+    assert key not in url
+
+    fallback_url, fallback_headers = _history_endpoint(CHAIN_ID, POOL, None)
+    assert fallback_url == f"https://base-sepolia.blockscout.com/api/v2/addresses/{POOL}/logs"
+    assert fallback_headers == {}
 
 
 def test_history_page_retries_transient_transport_error(monkeypatch):
