@@ -6,18 +6,18 @@ Licensed under [MIT](LICENSE).
 
 ## Current status
 
-This workspace contains a local read-only API, a responsive dashboard, Solidity contracts with isolated behavior tests, and an offline PyTorch training pipeline. It is **not yet a functioning deployed circuit breaker**:
+This workspace contains a local read-only API, a responsive dashboard, Solidity contracts, and an offline PyTorch training pipeline. A **manual no-value testnet callback path has been exercised**, but this is not an operational model-driven or production circuit breaker:
 
 - The selected source is the Base Sepolia Uniswap v3 USDC/WETH 0.3% pool, `0x46880b404CD35c165EDdefF7421019F8dD25F4Ad`.
 - A full Blockscout history pagination run returned 28,727 Swap logs from 2024-02-14 through 2026-11-11. Every returned log was matched to a successful RPC receipt and block header; independent proof that the explorer omitted no logs is still outstanding.
 - A separate opt-in observer can scan newer confirmed block ranges, validate returned Swap receipts, and update the local cache. It does not prove RPC completeness or run live neural inference.
 - The offline neural model passed only the trainer's minimum holdout gate on that snapshot. Test precision was 5.0% (77 true positives, 1,455 false positives); that is weak evidence, not a model suitable for automated pausing. A local opt-in research endpoint can show a score from the exact snapshot; no operational candidate is approved.
-- The API's publication route returns `503`. No signer, operator approval flow, deployed registry/Reactive/vault contracts, callback transaction, or paused vault exists.
-- Contracts and local tests do not demonstrate a live cross-chain integration. The vault accepts no assets and must never be used to protect funds.
+- A one-off manual test vector (`9000`, above the contract threshold) was published by the authorized testnet reporter and the Reactive callback paused the no-value vault. It was explicitly **not** produced by the neural model; the backend publication route still returns `503`.
+- The testnet registry, Reactive guard, and vault are deployed and individually verified. The vault accepts no deposited assets and must never be used to protect funds.
 
 See [`docs/source-audit.md`](docs/source-audit.md) for pool provenance, verified history scope and model metrics; [`contracts/NOTE.md`](contracts/NOTE.md) for deployment-order and integration constraints; and [`SECURITY.md`](SECURITY.md) for operational limits.
 
-For the no-value testnet rehearsal, see [`contracts/DEPLOYMENT.md`](contracts/DEPLOYMENT.md). Its Foundry scripts are dry-run only unless an operator explicitly passes `--broadcast`; no deployment is currently claimed.
+For the no-value testnet rehearsal and verified manual callback evidence, see [`contracts/DEPLOYMENT.md`](contracts/DEPLOYMENT.md). Future Foundry script steps remain dry-run only unless an operator explicitly passes `--broadcast` and approves that specific transaction.
 
 ## Local development
 
@@ -71,8 +71,8 @@ The trainer uses chronological train/validation/test partitions, derives the vol
 
 1. The full Blockscout pagination was receipt/header verified, but independent source-completeness reconciliation remains open. The configured RPC's free plan restricts `eth_getLogs` ranges; use a suitable independent source before claiming chain-wide completeness.
 2. Establish useful model performance—not just the minimum gate—on a fresh, real chronological holdout. The latest test split has already been observed and must not be tuned against. Freeze features, model hash and threshold before a live event.
-3. Confirm the precise Reactive callback route, addresses and funding requirements against current official documentation. Deploy registry, Reactive contract and no-value vault only on the supported development networks, with explicit owner approval.
-4. Implement operator authentication, approved signer custody, idempotent publication and safe reconciliation before enabling writes. Never place keys in the browser, repository, logs or chat.
-5. Independently reconcile the source event, score publication receipt, Reactive callback transaction and authoritative vault state. A dashboard status or local test is not proof of the full loop.
+3. The manual testnet callback route was verified once. Confirm current Reactive callback/funding parameters before any repeated run; deployment and destination configuration require separate explicit approval.
+4. The research model is not useful enough for automated action (5.0% holdout precision). Keep publication disabled until a new, independent evaluation supports a future model and operator authentication/key custody are reviewed.
+5. The manual test vector and callback have been reconciled, but no real model score has been published and the dashboard does not read on-chain callback state. A dashboard status is not proof of a live AI-driven loop.
 
-The repository is public, but no production safety, useful model effectiveness, deployment, or completed cross-chain loop is claimed here. The opt-in research score is not a live feed or an instruction to pause deposits.
+The repository is public and one manual testnet callback is verified; no production safety, useful model effectiveness, or completed AI-driven loop is claimed here. The opt-in research score is not a live feed or an instruction to pause deposits.

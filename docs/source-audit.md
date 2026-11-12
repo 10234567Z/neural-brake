@@ -1,6 +1,6 @@
 # Source and model audit
 
-This product audit records the latest paginated history import and chronological model result. It is not a proof that the explorer omitted no chain logs, model effectiveness, production readiness, or a deployed cross-chain circuit breaker.
+This product audit records the latest paginated history import, chronological model result, and one manual testnet callback. It is not a proof that the explorer omitted no chain logs, model effectiveness, production readiness, or a model-driven circuit breaker.
 
 ## Selected source
 
@@ -27,4 +27,8 @@ The untouched test partition produced TP 77, FP 1,455, FN 85, TN 2,683; precisio
 
 ## Reactive path
 
-Current Reactive documentation lists Base Sepolia (84532) and Reactive Lasna (5318007) as supported development networks and documents the Reactive System subscription and callback-proxy authentication model. This establishes documented API shapes only. No project registry, Reactive guard or vault is deployed; no publication, callback, vault pause or production protection is claimed.
+Current Reactive documentation lists Base Sepolia (84532) and Reactive Lasna (5318007) as supported development networks and documents the Reactive System subscription and callback-proxy authentication model. A read-only preflight verified the documented System/proxy addresses and code. The deployed ScoreRegistry is `0x7F796aC296C9616a53a7161d7544bf4194280c84`, the Lasna ReactiveRiskGuard is `0x6e1597B6252F8F9fb880c7a91970985820177dc4`, and the no-value Base Sepolia TestVault is `0x236B6766A44a881CE79B4022b4f007f910F6C304`. The guard reports the TestVault as its configured destination.
+
+One manually authorized ScoreRegistry event used score `9000` (above the immutable `7714` threshold) with test-only `modelVersion`/`sourceRef` markers; it was **not** model output or pool data. Base Sepolia transaction `0x6e94c6ef1bbe81fb7a247d8903952d00f9f8b74a4d4c353aabacc7eb27a57814` at block `57,715,522` emitted the approved ScorePublished event. The guard's replay flag was set, and Base Sepolia callback transaction `0xa9f6786fb52bb46e0b5b3c140ec8aa6d61504d480cec4601e7e43b3bc70dad16` at block `57,715,530` emitted a DepositsPaused event whose source transaction, log index, window ID, and Reactive sender matched. A read-only state check confirmed `depositsPaused=true`; a read-only `deposit()` call reverted while paused. After callback charges, Reactive reserves were `0.0850857 lREACT` and callback-proxy reserves were `0.000999285484 ETH`, both with zero debt.
+
+This establishes one manually triggered testnet path and one callback delivery. The research model's latest snapshot score was `3601/10000`, below threshold; test precision was `5.0%`. No model-generated score was published, no automatic publication/pause is enabled, and this is not production safety or evidence that future callbacks will always arrive.
