@@ -65,7 +65,8 @@ def _status() -> HealthResponse:
             detail="not checked" if rpc_configured else "NB_RPC_URL is missing"),
         "model": StatusComponent(configured=model_configured, available=False, detail=model_detail),
         "deployments": StatusComponent(configured=deployment_configured, available=False,
-            detail="no deployed integration verified" if not deployment_configured else "references configured but not verified"),
+            detail="no deployment references configured" if not deployment_configured
+            else "addresses configured; this API does not check live chain state"),
     }
     return HealthResponse(status="not_ready", components=components)
 
@@ -78,7 +79,7 @@ def live():
 @app.get("/api/v1/health/ready", response_model=HealthResponse)
 def ready():
     result = _status()
-    # No model/deployment readiness implementation exists, so remain fail-closed.
+    # A research-only model and manually verified contracts do not enable operational readiness.
     raise HTTPException(status_code=503, detail=result.model_dump(mode="json"))
 
 
@@ -89,7 +90,7 @@ def config():
         score_scale=str(SCORE_SCALE) if research_model else None,
         model_version=research_model.model_version if research_model else None,
         threshold=research_model.threshold if research_model else None,
-        pool_selection="provisional; not deployment or integration proof", deployments={
+        pool_selection="Base Sepolia pool identity verified; independent source completeness remains open", deployments={
             "score_registry": settings.registry_address, "reactive": settings.reactive_address, "vault": settings.vault_address,
         })
 

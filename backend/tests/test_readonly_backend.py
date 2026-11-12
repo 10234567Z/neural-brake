@@ -229,7 +229,13 @@ def test_research_model_rejects_tampered_artifact(tmp_path):
 def test_research_score_api_is_read_only_and_does_not_change_readiness(monkeypatch, tmp_path):
     settings = _research_settings(str(tmp_path / "research.sqlite3"))
     artifact = _test_research_artifact(tmp_path, settings)
-    settings = replace(settings, model_artifact=artifact)
+    settings = replace(
+        settings,
+        model_artifact=artifact,
+        registry_address="0x" + "11" * 20,
+        reactive_address="0x" + "22" * 20,
+        vault_address="0x" + "33" * 20,
+    )
     model = load_research_model(artifact, settings)
     records = _timestamped_observations(11)
     store = Store(settings.database_path)
@@ -246,10 +252,14 @@ def test_research_score_api_is_read_only_and_does_not_change_readiness(monkeypat
     assert response.json()["status"] == "research_only"
     assert response.json()["automatic_action_enabled"] is False
     assert response.json()["snapshot_observation_count"] == len(records)
+    config = client.get("/api/v1/config").json()
+    assert "pool identity verified" in config["pool_selection"]
+    assert config["deployments"]["reactive"] == "0x" + "22" * 20
 
     ready = client.get("/api/v1/health/ready")
     assert ready.status_code == 503
     assert ready.json()["detail"]["components"]["model"]["available"] is False
+    assert "does not check live chain state" in ready.json()["detail"]["components"]["deployments"]["detail"]
     assert client.get("/api/v1/candidates/latest").json()["available"] is False
     assert client.post("/api/v1/candidates/research/publish").status_code == 503
 
